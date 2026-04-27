@@ -121,7 +121,7 @@ jobs:
       # server or binding any ports. A non-zero exit means the config is broken.
       - name: Test freeradius config is valid
         run: |
-          docker run --rm freeradius:ci-test radiusd -XC
+          docker run --rm --add-host=radsecproxy:127.0.0.1 freeradius:ci-test radiusd -XC
           echo "freeradius config is valid"
 
       - name: Push freeradius image

@@ -1,96 +1,179 @@
 name: Docker
 
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
 on:
   schedule:
     - cron: '29 21 * * *'
   push:
     branches: [ "main" ]
-    # Publish semver tags as releases.
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main" ]
 
-env:
-  # Use docker.io for Docker Hub if empty
-  REGISTRY: ghcr.io
-  # github.repository as <account>/<repo>
-  IMAGE_NAME: ${{ github.repository }}
-
-
 jobs:
-  build:
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # BUILD & TEST
+  # Builds both Docker images, validates they actually work, then pushes to
+  # ghcr.io. On pull requests the push is skipped — CI still runs fully so
+  # you know the PR is safe before merging.
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-and-test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      # This is used to complete the identity challenge
-      # with sigstore/fulcio when running outside of PRs.
-      id-token: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # Install the cosign tool except on PR
-      # https://github.com/sigstore/cosign-installer
-      - name: Install cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@f3c664df7af409cb4873aa5068053ba9d61a57b6 #v2.6.0
-        with:
-          cosign-release: 'v1.11.0'
+      # Generate self-signed certs used only for CI validation.
+      # radsecproxy needs them mounted at runtime.
+      # freeradius bakes them into the image at build time (Dockerfile chowns them).
+      - name: Generate test certificates
+        run: |
+          mkdir -p /tmp/ci-certs/chain
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout /tmp/ci-certs/key.pem \
+            -out    /tmp/ci-certs/cert.pem \
+            -days 1 -nodes -subj "/CN=ci-test"
+          cp /tmp/ci-certs/cert.pem /tmp/ci-certs/chain.pem
+          cp /tmp/ci-certs/cert.pem /tmp/ci-certs/chain/WBA_OpenRoaming_Root.pem
+          cp /tmp/ci-certs/cert.pem hybrid/configs/freeradius/certs/cert.pem
+          cp /tmp/ci-certs/key.pem  hybrid/configs/freeradius/certs/privkey.pem
+          cp /tmp/ci-certs/cert.pem hybrid/configs/freeradius/certs/fullchain.pem
 
-
-      # Workaround: https://github.com/docker/build-push-action/issues/461
       - name: Setup Docker buildx
-        uses: docker/setup-buildx-action@79abd3f86f79a9d68a23c75a09a9a85889262adf
+        uses: docker/setup-buildx-action@v3
 
-      # Login against a Docker registry except on PR
-      # https://github.com/docker/login-action
-      - name: Log into registry ${{ env.REGISTRY }}
+      - name: Log into ghcr.io
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@28218f9b04b4f3f62068d7b6ce6ca5b26e35336c
+        uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+      # ── radsecproxy ──────────────────────────────────────────────────────────
+
+      - name: Build radsecproxy image
+        uses: docker/build-push-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          context: ./hybrid
+          dockerfile: ./hybrid/Dockerfile
+          push: false
+          load: true
+          tags: radsecproxy:ci-test
+          cache-from: type=gha,scope=radsecproxy
+          cache-to: type=gha,mode=max,scope=radsecproxy
 
-      # Build and push Docker image with Buildx (don't push on PR)
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        id: build-and-push
-        uses: docker/build-push-action@ac9327eae2b366085ac7f6a2d02df8aa8ead720a
+      # Start the container with the stub config and CI certs, wait 5 seconds,
+      # then check it is still running. A bad config causes an immediate crash.
+      - name: Test radsecproxy starts cleanly
+        run: |
+          docker run -d --name radsec-test \
+            -v "${{ github.workspace }}/.github/ci/radsecproxy-test.conf:/etc/radsecproxy.conf" \
+            -v "/tmp/ci-certs:/etc/radsecproxy/certs" \
+            radsecproxy:ci-test
+
+          sleep 5
+
+          if [ "$(docker inspect -f '{{.State.Running}}' radsec-test)" != "true" ]; then
+            echo "radsecproxy crashed on startup — logs:"
+            docker logs radsec-test
+            docker rm radsec-test
+            exit 1
+          fi
+
+          echo "radsecproxy is running"
+          docker stop radsec-test
+          docker rm radsec-test
+
+      # Rebuild from the GHA cache (fast — all layers already cached above)
+      # and push to the registry now that the image is confirmed working.
+      - name: Push radsecproxy image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
         with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          context: ./hybrid
+          dockerfile: ./hybrid/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/radsecproxy:${{ github.ref_name }}
+          cache-from: type=gha,scope=radsecproxy
 
+      # ── freeradius ───────────────────────────────────────────────────────────
 
-      # Sign the resulting Docker image digest except on PRs.
-      # This will only write to the public Rekor transparency log when the Docker
-      # repository is public to avoid leaking data.  If you would like to publish
-      # transparency data even for private images, pass --force to cosign below.
-      # https://github.com/sigstore/cosign
-      - name: Sign the published Docker image
-        if: ${{ github.event_name != 'pull_request' }}
+      - name: Build freeradius image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./hybrid
+          dockerfile: ./hybrid/DockerfileFreeRadius
+          push: false
+          load: true
+          tags: freeradius:ci-test
+          cache-from: type=gha,scope=freeradius
+          cache-to: type=gha,mode=max,scope=freeradius
+
+      # radiusd -XC validates the entire config and exits without starting the
+      # server or binding any ports. A non-zero exit means the config is broken.
+      - name: Test freeradius config is valid
+        run: |
+          docker run --rm freeradius:ci-test radiusd -XC
+          echo "freeradius config is valid"
+
+      - name: Push freeradius image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./hybrid
+          dockerfile: ./hybrid/DockerfileFreeRadius
+          push: true
+          tags: ghcr.io/${{ github.repository }}/freeradius:${{ github.ref_name }}
+          cache-from: type=gha,scope=freeradius
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DEPLOY
+  # Pulls the images that just passed CI from ghcr.io and restarts the stack.
+  # Only runs on push to main — not on PRs, tag pushes, or scheduled runs.
+  #
+  # Required secrets (set in repo Settings → Secrets → Actions):
+  #   DEPLOY_HOST     — IP or hostname of the production VM
+  #   DEPLOY_USER     — SSH login user on the VM
+  #   DEPLOY_SSH_KEY  — private SSH key for that user
+  #   GHCR_TOKEN      — GitHub PAT with read:packages scope (for docker pull on VM)
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy to connector VM
+        uses: appleboy/ssh-action@v1.0.3
         env:
-          COSIGN_EXPERIMENTAL: "true"
-        # This step uses the identity token to provision an ephemeral certificate
-        # against the sigstore community Fulcio instance.
-        run: echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign {}@${{ steps.build-and-push.outputs.digest }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          REPO: ${{ github.repository }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GHCR_TOKEN,GHCR_USER,REPO
+          script: |
+            set -e
+            cd /root/wba-openroaming-connector/hybrid
+
+            # Authenticate so docker can pull from ghcr.io
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            # Pull the exact images that just passed CI — no rebuild on the VM
+            RADSECPROXY_IMAGE=ghcr.io/$REPO/radsecproxy:main \
+            FREERADIUS_IMAGE=ghcr.io/$REPO/freeradius:main \
+            docker compose pull
+
+            # Restart the stack using the pulled images
+            RADSECPROXY_IMAGE=ghcr.io/$REPO/radsecproxy:main \
+            FREERADIUS_IMAGE=ghcr.io/$REPO/freeradius:main \
+            docker compose up -d
+
+            docker image prune -f

@@ -3,6 +3,7 @@ version: '3.2'
 services:
 
   radsecproxy:
+    image: ${RADSECPROXY_IMAGE:-radsecproxy:local}
     build:
       dockerfile: Dockerfile
       context: .
@@ -34,6 +35,7 @@ services:
       - ./configs/mysql/schema/freeradius.sql:/docker-entrypoint-initdb.d/freeradius.sql
 
   freeradius:
+    image: ${FREERADIUS_IMAGE:-freeradius:local}
     restart: always
     build:
       dockerfile: DockerfileFreeRadius

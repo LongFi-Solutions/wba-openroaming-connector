@@ -27,6 +27,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Lowercase repository name
+        run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       # Generate self-signed certs used only for CI validation.
       # radsecproxy needs them mounted at runtime.
       # freeradius bakes them into the image at build time (Dockerfile chowns them).
@@ -60,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./hybrid
-          dockerfile: ./hybrid/Dockerfile
+          file: ./hybrid/Dockerfile
           push: false
           load: true
           tags: radsecproxy:ci-test
@@ -96,9 +99,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./hybrid
-          dockerfile: ./hybrid/Dockerfile
+          file: ./hybrid/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}/radsecproxy:${{ github.ref_name }}
+          tags: ghcr.io/${{ env.REPO_LC }}/radsecproxy:${{ github.ref_name }}
           cache-from: type=gha,scope=radsecproxy
 
       # ── freeradius ───────────────────────────────────────────────────────────
@@ -107,7 +110,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./hybrid
-          dockerfile: ./hybrid/DockerfileFreeRadius
+          file: ./hybrid/DockerfileFreeRadius
           push: false
           load: true
           tags: freeradius:ci-test
@@ -126,9 +129,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./hybrid
-          dockerfile: ./hybrid/DockerfileFreeRadius
+          file: ./hybrid/DockerfileFreeRadius
           push: true
-          tags: ghcr.io/${{ github.repository }}/freeradius:${{ github.ref_name }}
+          tags: ghcr.io/${{ env.REPO_LC }}/freeradius:${{ github.ref_name }}
           cache-from: type=gha,scope=freeradius
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -153,7 +156,7 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-          REPO: ${{ github.repository }}
+          REPO: ${{ env.REPO_LC }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}

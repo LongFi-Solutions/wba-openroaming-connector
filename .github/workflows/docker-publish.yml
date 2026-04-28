@@ -2,15 +2,14 @@ name: Docker
 
 on:
   schedule:
-    - cron: '29 21 * * *'
+    - cron: "29 21 * * *"
   push:
-    branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
+    branches: ["main"]
+    tags: ["v*.*.*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-
   # ─────────────────────────────────────────────────────────────────────────────
   # BUILD & TEST
   # Builds both Docker images, validates they actually work, then pushes to
@@ -136,47 +135,60 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # DEPLOY
-  # Pulls the images that just passed CI from ghcr.io and restarts the stack.
+  # Authenticates to GCP via Workload Identity Federation, then SSHes into the
+  # VM through the IAP tunnel (no open port 22 needed). Pulls the tested images
+  # from ghcr.io and restarts the stack.
   # Only runs on push to main — not on PRs, tag pushes, or scheduled runs.
   #
-  # Required secrets (set in repo Settings → Secrets → Actions):
-  #   DEPLOY_HOST     — IP or hostname of the production VM
-  #   DEPLOY_USER     — SSH login user on the VM
-  #   DEPLOY_SSH_KEY  — private SSH key for that user
-  #   GHCR_TOKEN      — GitHub PAT with read:packages scope (for docker pull on VM)
+  # Required secrets:
+  #   GCP_WORKLOAD_IDENTITY_PROVIDER — WIF provider resource name
+  #   GCP_SERVICE_ACCOUNT            — service account email
+  #   GCP_PROJECT_ID                 — GCP project ID
+  #   GCP_ZONE                       — VM zone (e.g. us-central1-a)
+  #   DEPLOY_HOST                    — VM instance name (not IP)
+  #   DEPLOY_USER                    — Linux user on the VM
+  #   GHCR_TOKEN                     — GitHub PAT with read:packages scope
+  #
+  # Required IAM roles on the service account:
+  #   roles/iap.tunnelResourceAccessor
+  #   roles/compute.osLogin
   # ─────────────────────────────────────────────────────────────────────────────
   deploy:
     needs: build-and-test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-      - name: Deploy to connector VM
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
-          REPO: ${{ env.REPO_LC }}
+      - name: Lowercase repository name
+        run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN,GHCR_USER,REPO
-          script: |
-            set -e
-            cd /root/wba-openroaming-connector/hybrid
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-            # Authenticate so docker can pull from ghcr.io
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
 
-            # Pull the exact images that just passed CI — no rebuild on the VM
-            RADSECPROXY_IMAGE=ghcr.io/$REPO/radsecproxy:main \
-            FREERADIUS_IMAGE=ghcr.io/$REPO/freeradius:main \
-            docker compose pull
-
-            # Restart the stack using the pulled images
-            RADSECPROXY_IMAGE=ghcr.io/$REPO/radsecproxy:main \
-            FREERADIUS_IMAGE=ghcr.io/$REPO/freeradius:main \
-            docker compose up -d
-
-            docker image prune -f
+      - name: Deploy to connector VM via IAP
+        run: |
+          gcloud compute ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            --tunnel-through-iap \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --zone=${{ secrets.GCP_ZONE }} \
+            --command="
+              set -e
+              cd /root/wba-openroaming-connector/hybrid
+              echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+              RADSECPROXY_IMAGE=ghcr.io/${{ env.REPO_LC }}/radsecproxy:main \
+              FREERADIUS_IMAGE=ghcr.io/${{ env.REPO_LC }}/freeradius:main \
+              docker compose pull
+              RADSECPROXY_IMAGE=ghcr.io/${{ env.REPO_LC }}/radsecproxy:main \
+              FREERADIUS_IMAGE=ghcr.io/${{ env.REPO_LC }}/freeradius:main \
+              docker compose up -d
+              docker image prune -f
+            "

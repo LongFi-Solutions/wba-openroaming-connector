@@ -176,6 +176,11 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Deploy to connector VM via IAP
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          REPO_LC: ${{ env.REPO_LC }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           gcloud compute ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
             --tunnel-through-iap \
@@ -183,13 +188,13 @@ jobs:
             --zone=${{ secrets.GCP_ZONE }} \
             --command="
               set -e
-              cd /home/${{ secrets.DEPLOY_USER }}/wba-openroaming-connector/hybrid
-              echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
-              RADSECPROXY_IMAGE=ghcr.io/${{ env.REPO_LC }}/radsecproxy:main \
-              FREERADIUS_IMAGE=ghcr.io/${{ env.REPO_LC }}/freeradius:main \
+              cd /home/$DEPLOY_USER/wba-openroaming-connector/hybrid
+              echo $GHCR_TOKEN | docker login ghcr.io -u $GHCR_USER --password-stdin
+              RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:main \
+              FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:main \
               docker compose pull
-              RADSECPROXY_IMAGE=ghcr.io/${{ env.REPO_LC }}/radsecproxy:main \
-              FREERADIUS_IMAGE=ghcr.io/${{ env.REPO_LC }}/freeradius:main \
+              RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:main \
+              FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:main \
               docker compose up -d
               docker image prune -f
             "

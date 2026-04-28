@@ -165,20 +165,6 @@ jobs:
       - name: Lowercase repository name
         run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      - name: Debug OIDC token claims
-        run: |
-          OIDC_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.googleapis.com")
-          echo $OIDC_TOKEN | python3 -c "
-          import sys,json,base64
-          token=json.load(sys.stdin)['value'].split('.')[1]
-          padded=token+'=='*3
-          claims=json.loads(base64.b64decode(padded))
-          print('repository:', claims.get('repository'))
-          print('repository_owner:', claims.get('repository_owner'))
-          print('sub:', claims.get('sub'))
-          "
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -188,12 +174,6 @@ jobs:
 
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
-
-      - name: Debug auth
-        run: |
-          gcloud auth list
-          gcloud config list account
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_APPLICATION_CREDENTIALS"
 
       - name: Deploy to connector VM via IAP
         run: |

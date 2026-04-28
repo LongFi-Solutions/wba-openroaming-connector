@@ -177,8 +177,6 @@ jobs:
 
       - name: Deploy to connector VM via IAP
         env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
           REPO_LC: ${{ env.REPO_LC }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
@@ -189,7 +187,6 @@ jobs:
             --command="
               set -e
               cd /home/$DEPLOY_USER/wba-openroaming-connector/hybrid
-              echo $GHCR_TOKEN | docker login ghcr.io -u $GHCR_USER --password-stdin
               RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:main \
               FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:main \
               docker compose pull

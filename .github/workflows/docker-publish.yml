@@ -122,7 +122,7 @@ jobs:
           docker run --rm --add-host=radsecproxy:127.0.0.1 \
             -v "/tmp/ci-certs/freeradius:/etc/freeradius/certs" \
             freeradius:ci-test \
-            sh -c "chown freerad:freerad /etc/freeradius/certs/*.pem && chmod 600 /etc/freeradius/certs/*.pem && radiusd -XC"
+            sh -c "chown freerad:freerad /etc/freeradius/certs/*.pem && chmod 600 /etc/freeradius/certs/*.pem && freeradius -XC"
           echo "freeradius config is valid"
 
       - name: Push freeradius image

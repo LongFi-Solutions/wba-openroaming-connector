@@ -43,7 +43,7 @@ services:
     command: >
       sh -c "chown freerad:freerad /etc/freeradius/certs/*.pem &&
              chmod 600 /etc/freeradius/certs/*.pem &&
-             exec radiusd -f -l /dev/stdout -xx"
+             exec freeradius -f -l /dev/stdout -xx"
     depends_on:
       - radsecproxy
       - mysql

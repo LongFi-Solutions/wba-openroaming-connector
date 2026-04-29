@@ -10,8 +10,3 @@ RUN chmod -R 600 /etc/freeradius/sites-available
 RUN chown -R freerad:freerad /etc/freeradius/sites-enabled
 RUN chown -R freerad:freerad /etc/freeradius/sites-available
 RUN mkdir -p /etc/freeradius/certs
-
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["radiusd", "-f", "-l", "/dev/stdout", "-xx"]

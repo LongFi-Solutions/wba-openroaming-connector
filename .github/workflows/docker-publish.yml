@@ -121,6 +121,7 @@ jobs:
         run: |
           docker run --rm --add-host=radsecproxy:127.0.0.1 \
             -v "/tmp/ci-certs/freeradius:/etc/freeradius/certs" \
+            -v "${{ github.workspace }}/hybrid/configs/freeradius/mods-available/eap:/etc/freeradius/mods-enabled/eap" \
             freeradius:ci-test \
             sh -c "chown freerad:freerad /etc/freeradius/certs/*.pem && chmod 600 /etc/freeradius/certs/*.pem && freeradius -XC"
           echo "freeradius config is valid"

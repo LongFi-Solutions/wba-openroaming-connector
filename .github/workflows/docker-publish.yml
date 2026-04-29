@@ -30,20 +30,19 @@ jobs:
         run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
       # Generate self-signed certs used only for CI validation.
-      # radsecproxy needs them mounted at runtime.
-      # freeradius bakes them into the image at build time (Dockerfile chowns them).
+      # radsecproxy and freeradius both need them mounted at runtime.
       - name: Generate test certificates
         run: |
-          mkdir -p /tmp/ci-certs/chain
+          mkdir -p /tmp/ci-certs/chain /tmp/ci-certs/freeradius
           openssl req -x509 -newkey rsa:2048 \
             -keyout /tmp/ci-certs/key.pem \
             -out    /tmp/ci-certs/cert.pem \
             -days 1 -nodes -subj "/CN=ci-test"
           cp /tmp/ci-certs/cert.pem /tmp/ci-certs/chain.pem
           cp /tmp/ci-certs/cert.pem /tmp/ci-certs/chain/WBA_OpenRoaming_Root.pem
-          cp /tmp/ci-certs/cert.pem hybrid/configs/freeradius/certs/cert.pem
-          cp /tmp/ci-certs/key.pem  hybrid/configs/freeradius/certs/privkey.pem
-          cp /tmp/ci-certs/cert.pem hybrid/configs/freeradius/certs/fullchain.pem
+          cp /tmp/ci-certs/cert.pem /tmp/ci-certs/freeradius/cert.pem
+          cp /tmp/ci-certs/key.pem  /tmp/ci-certs/freeradius/privkey.pem
+          cp /tmp/ci-certs/cert.pem /tmp/ci-certs/freeradius/fullchain.pem
 
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@v3
@@ -120,7 +119,9 @@ jobs:
       # server or binding any ports. A non-zero exit means the config is broken.
       - name: Test freeradius config is valid
         run: |
-          docker run --rm --add-host=radsecproxy:127.0.0.1 freeradius:ci-test radiusd -XC
+          docker run --rm --add-host=radsecproxy:127.0.0.1 \
+            -v "/tmp/ci-certs/freeradius:/etc/freeradius/certs" \
+            freeradius:ci-test radiusd -XC
           echo "freeradius config is valid"
 
       - name: Push freeradius image

@@ -40,12 +40,12 @@ services:
     build:
       dockerfile: DockerfileFreeRadius
       context: .
-    command: [ "radiusd", "-f", "-l", "/dev/stdout", "-xx" ]
     depends_on:
       - radsecproxy
       - mysql
     volumes:
       - ./configs/freeradius/mods-available/sql:/etc/freeradius/mods-enabled/sql
       - ./configs/freeradius/mods-available/eap:/etc/freeradius/mods-enabled/eap
+      - /home/github-deploy/wba-openroaming-connector/certs/freeradius:/etc/freeradius/certs
 volumes:
   mysql_data:

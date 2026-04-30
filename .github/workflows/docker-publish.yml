@@ -4,10 +4,10 @@ on:
   schedule:
     - cron: "29 21 * * *"
   push:
-    branches: ["main"]
+    branches: ["main", "production"]
     tags: ["v*.*.*"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "production"]
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ jobs:
   deploy:
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
     permissions:
       contents: read
       id-token: write
@@ -189,11 +189,11 @@ jobs:
             --command="
               set -e
               cd /home/$DEPLOY_USER/wba-openroaming-connector/hybrid
-              RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:main \
-              FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:main \
+              RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:production \
+              FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:production \
               docker compose pull
-              RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:main \
-              FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:main \
+              RADSECPROXY_IMAGE=ghcr.io/$REPO_LC/radsecproxy:production \
+              FREERADIUS_IMAGE=ghcr.io/$REPO_LC/freeradius:production \
               docker compose up -d
               docker image prune -f
             "
